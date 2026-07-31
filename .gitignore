@@ -13,3 +13,4 @@ x64/
 *.log
 *.o
 *.so
+.DS_Store

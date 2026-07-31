@@ -52,7 +52,9 @@ This fork uses WinUSB plus libusb from an emulated x86 DLL. The USB driver remai
 
 Install Build Tools for Visual Studio and the Desktop C++ workload.
 
-Download the Windows libusb release archive from:
+The all-in-one installer can download and extract libusb automatically if 7-Zip is installed. The repo does not vendor libusb binaries; it downloads the official libusb release and verifies the SHA-256 hash before copying the needed x86 files into place.
+
+Manual libusb setup is also supported. Download the Windows libusb release archive from:
 
 ```text
 https://github.com/libusb/libusb/releases
@@ -109,6 +111,36 @@ If you try a custom/manual INF and Windows refuses to install it because the dri
 Secure Boot can also block test-signing changes such as `bcdedit /set testsigning on`. Prefer Zadig/WinUSB first, and only use unsigned INF/test-signing workflows if you know you need them.
 
 ## Generic J2534 Install
+
+For a fresh Windows ARM VM, the all-in-one installer is preferred. Run from an Administrator Command Prompt in the repo root:
+
+```bat
+extras\install_windows_arm.cmd -EvoScanDir "C:\Program Files (x86)\EvoScan\EvoScan v2.9"
+```
+
+The installer will build `Release|x86` if needed, copy the DLLs to `C:\J2534\OpenPort`, register the 32-bit J2534 provider, enable logging, replace EvoScan's `op20pt32.dll`, and print OpenPort USB status.
+
+If the required libusb files are missing, the installer downloads the official libusb release from GitHub, verifies its SHA-256 hash, extracts it with 7-Zip, and copies the x86 files into the expected repo layout. Install 7-Zip first if you want this automatic path.
+
+If PowerShell script execution is blocked, use the `.cmd` launcher above. It runs PowerShell with `-ExecutionPolicy Bypass` for that one invocation only.
+
+If you already have a built DLL and only want to install it, use:
+
+```bat
+extras\install_windows_arm.cmd -NoBuild
+```
+
+If you do not want to modify EvoScan, use:
+
+```bat
+extras\install_windows_arm.cmd -NoEvoScan
+```
+
+If you want to prevent automatic libusb downloading and require the files to already exist locally, use:
+
+```bat
+extras\install_windows_arm.cmd -NoLibusbDownload
+```
 
 After building, run from an Administrator Command Prompt:
 
