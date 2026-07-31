@@ -93,6 +93,21 @@ Expected USB ID:
 USB\VID_0403&PID_CC4D
 ```
 
+### Driver Signature Enforcement
+
+Using Zadig to bind the device to WinUSB is preferred because it usually avoids manually installing an unsigned driver package.
+
+If you try a custom/manual INF and Windows refuses to install it because the driver is unsigned, temporarily disable driver signature enforcement from Windows Advanced Startup:
+
+1. Open Settings.
+2. Go to System, Recovery, Advanced startup.
+3. Restart now.
+4. Choose Troubleshoot, Advanced options, Startup Settings, Restart.
+5. Press the option for Disable driver signature enforcement.
+6. Install the driver before the next normal reboot.
+
+Secure Boot can also block test-signing changes such as `bcdedit /set testsigning on`. Prefer Zadig/WinUSB first, and only use unsigned INF/test-signing workflows if you know you need them.
+
 ## Generic J2534 Install
 
 After building, run from an Administrator Command Prompt:
