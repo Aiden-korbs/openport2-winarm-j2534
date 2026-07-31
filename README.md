@@ -1,64 +1,204 @@
-# j2534
+# OpenPort 2.0 J2534 for Windows ARM
 
-j2534 is a library written specifically for the [Tactrix Openport 2.0](https://www.tactrix.com/index.php?option=com_virtuemart&page=shop.product_details&flypage=flypage.tpl&product_id=17&Itemid=53&redirected=1&Itemid=53 "Tactrix Openport 2.0") cable.
+This is a Windows ARM focused fork of `j2534`, a libusb-based SAE J2534-1 library for the Tactrix OpenPort 2.0 cable.
 
-This library implements most of the SAE J2534-1 API functions as used by the [RomRaider - Open Source ECU Tuning](https://www.romraider.com/ "RomRaider - Open Source ECU Tuning") project.
+The goal of this fork is to make an OpenPort 2.0 usable from 32-bit x86 diagnostic applications running under Windows 11 ARM emulation, where the original Tactrix x86/x64 kernel driver cannot be loaded.
 
-The library can be compiled on Linux or Windows for either 32 or 64 bits systems.  The library depends on [libusb](https://libusb.info/ "libusb") version 1.08 or higher.
+Tested target setup:
 
+- Apple Silicon Mac running a Windows 11 ARM VM
+- OpenPort 2.0 USB device attached to the VM
+- OpenPort bound to Microsoft WinUSB with Zadig
+- 32-bit x86 build of this DLL
+- 32-bit x86 `libusb-1.0.dll`
+- EvoScan 2.9 using this DLL as `op20pt32.dll`
 
-## Linux Compilation
-- Install pkg-config
-- Install libusb-1.0-devel
-- Run make on the command line to compile the library
-- Run make install if you wish to install the library in `/usr/local/lib/`
+Do not use this fork for ECU flashing unless you have independently validated it for your exact vehicle, VM, USB path, and application. Current focus is diagnostics and datalogging.
 
+## Attribution
 
-## Windows Compilation
-To compile under Windows you can use 'Build Tools for Visual Studio' or install the Visual Studio Community IDE and the build tools package.  
+This fork is based on the original project:
 
-- From the [libusb](https://libusb.info/ "libusb") web site download the Windows binaries
-- Extract the archive using [7-Zip](https://www.7-zip.org/ "7-Zip")
-- Copy or move the libusb folder that matches your VS version into the base j2534 project directory
-- Rename the VS20xx folder to libusb
-- Copy or move the libusb include folder from the archive into the renamed (libusb) folder in the project
+- Upstream repository: `https://github.com/NikolaKozina/j2534`
+- Original authors shown in source: NikolaKozina and Dale Schultz
+- Original license: BSD 3-Clause, retained in `LICENSE`
 
-### Command line build
-To build on the command line, open '__platform__ Native Tools Command Prompt' where __platform__ is either x86 or x64 and change into the j2534 project directory.
+This project depends on libusb:
 
-To build the Release version of the project, on the command line enter:  
-&nbsp;&nbsp;&nbsp;&nbsp;`msbuild.exe j2534.sln /p:Configuration="Release"`
+- libusb project: `https://libusb.info/`
+- libusb releases: `https://github.com/libusb/libusb/releases`
 
-### Visual Studio build
-To build in Visual Studio, launch Visual Studio and open the solution file in the j2534 project directory.  Select Debug|Release and x86|x64 in the toolbar and from the Build menu select Build Solution.
+Tactrix, OpenPort, EvoScan, EcuFlash, Honda, Mitsubishi, and other product names are trademarks of their respective owners. This fork is not affiliated with or endorsed by those projects or companies.
 
+## What This Fork Adds
 
-## Using the library
-Before using this library, remove the SD card from the Openport 2.0
+- Windows x86 J2534 calling convention and undecorated exports for applications that load J2534 functions by name.
+- Windows ARM notes and helper scripts.
+- Safer null checks and error handling in several J2534 entry points.
+- Fixes for channel validation and `PassThruGetLastError` copying.
+- Timeout handling for `PassThruReadMsgs(..., Timeout=0)`.
+- 29-bit CAN flag handling.
+- Basic support for `CLEAR_MSG_FILTERS`.
+- EvoScan/OpenPort compatibility work, including `READ_VBATT` before channel connect and experimental `FIVE_BAUD_INIT` support.
+- Diagnostic logging on DLL load and J2534 calls via `LOG_ENABLE`.
 
-### Linux
-USB devices require write permission, add a udev rule entry in `/etc/udev/rules.d/`
-with the contents such as this to allow write access:  
-`SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTR{idProduct}=="cc4d", GROUP="dialout", MODE="0666"`
+## Why Windows ARM Needs This
 
-Your User ID must also be a member of the `dialout` group on the system.
+Windows ARM can run many x86 user-mode applications and DLLs, but it cannot load x86/x64 kernel drivers. The normal Tactrix OpenPort driver path depends on a kernel driver, so it is not suitable for Windows ARM VMs.
 
-### Windows
-Before using the this library with the Openport 2.0 cable the system driver from Tactrix has to be replaced with the WinUSB driver so that libusb can interface your application with the Openport 2.0 cable.  The easiest way to complete this is to use [Zadig](https://zadig.akeo.ie/ "Zadig").  Follow the instructions on the Zadig web site after you download the application.
+This fork uses WinUSB plus libusb from an emulated x86 DLL. The USB driver remains native Windows, while the diagnostic application and this J2534 DLL run as x86 user-mode code.
 
-The SAE J2534-1 specification indicates that J2534 drivers can be located via the Windows Registry.  After building the project copy the `j2534.dll` and the `libusb-1.0.dll` into the appropriate system directory. The default locations are:  
-x86 - `C:\Windows\SysWOW64\`  
-x64 - `C:\Windows\System32\`
+## Build On Windows ARM
 
-For convenience a registry merge file has been provided in the extras directory to populate the Registry with the information pertaining to the J2534 DLL location and supported protocols. Note: the SAE J2534-1 specification does not provide any guidance for x64 systems.  
-If you wish to use a different location for the `j2534.dll` and the `libusb-1.0.dll` on your system, adjust the registry merge file accordingly.
+Install Build Tools for Visual Studio and the Desktop C++ workload.
 
-If you wish to revert back to the Tactrix provided driver for the Openport 2.0, open Device Manager, the device should be listed under the Universal Serial Bus devices section.  
-- Right-click and select Update Driver
-- Choose Browse my computer for drivers
-- Click Let me pick from a list of available drivers
-- Select Tactrix Openport 2.0 J2534 Vehicle Interface
-- Click Next
+Download the Windows libusb release archive from:
 
-The driver should now be reverted.  
-To switch back to the WinUSB driver, repeat the process to update the driver.  
+```text
+https://github.com/libusb/libusb/releases
+```
+
+Extract the needed x86 files into this layout:
+
+```text
+libusb\include\libusb-1.0\libusb.h
+libusb\MS32\Release\dll\libusb-1.0.lib
+libusb\MS32\Release\dll\libusb-1.0.dll
+```
+
+Build from an x86 developer command prompt or normal Administrator Command Prompt:
+
+```bat
+cd /d C:\Users\Aiden\Desktop\j2534
+"C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\MSBuild\Current\Bin\MSBuild.exe" j2534.sln /p:Configuration=Release /p:Platform=x86
+```
+
+If your Visual Studio install uses a different MSBuild path, adjust the command. The solution platform is `x86`, not `Win32`.
+
+If the project complains about an unavailable platform toolset, retarget `j2534\j2534.vcxproj` to the installed toolset, for example `v145`.
+
+## OpenPort Driver Setup
+
+Inside the Windows ARM VM, bind OpenPort 2.0 to WinUSB:
+
+1. Plug the OpenPort 2.0 into the VM.
+2. Open Zadig.
+3. Select `OpenPort 2.0`.
+4. Replace the current driver with `WinUSB`.
+5. Confirm Device Manager shows the device under USB devices, not as the Tactrix kernel driver.
+
+Expected USB ID:
+
+```text
+USB\VID_0403&PID_CC4D
+```
+
+## Generic J2534 Install
+
+After building, run from an Administrator Command Prompt:
+
+```bat
+extras\install_verify_windows_arm_x86.bat
+```
+
+This copies files to:
+
+```text
+C:\J2534\OpenPort\j2534.dll
+C:\J2534\OpenPort\libusb-1.0.dll
+```
+
+It also registers a 32-bit J2534 provider under:
+
+```text
+HKLM\SOFTWARE\WOW6432Node\PassThruSupport.04.04\RomRaider - OP2 J2534
+```
+
+## EvoScan 2.9 Install
+
+EvoScan can load OpenPort support directly from its own `op20pt32.dll` rather than using the Windows J2534 registry. For EvoScan, replace that DLL with this fork's built DLL.
+
+Run from an Administrator Command Prompt:
+
+```bat
+extras\install_evoscan_windows_arm_x86.bat "C:\Program Files (x86)\EvoScan\EvoScan v2.9"
+```
+
+The script backs up the existing DLL to:
+
+```text
+op20pt32.dll.tactrix.bak
+```
+
+Then it copies:
+
+```text
+Release\j2534.dll -> op20pt32.dll
+libusb\MS32\Release\dll\libusb-1.0.dll -> libusb-1.0.dll
+```
+
+If EvoScan shows an FTDI driver warning on Windows ARM, do not install the FTDI/Tactrix driver path for OpenPort. The working path for this fork is WinUSB/libusb.
+
+## Logging
+
+Enable logging with:
+
+```bat
+setx LOG_ENABLE C:\J2534\op2.log /M
+setx LIBUSB_DEBUG 3 /M
+```
+
+Close and reopen EvoScan after setting environment variables.
+
+View logs with:
+
+```bat
+type C:\J2534\op2.log
+```
+
+If no log appears, the application did not load this DLL.
+
+## Known Working Result
+
+The current fork has been used to get EvoScan 2.9 on Windows ARM to:
+
+- Load the replacement OpenPort DLL.
+- Detect OpenPort 2.0.
+- Read OpenPort firmware version.
+- Read vehicle battery voltage.
+- Connect ISO9141 at `10400` baud.
+- Send and receive OpenPort USB command/loopback traffic.
+- Reach and handle EvoScan's `FIVE_BAUD_INIT` path for ISO9141 address `0x33`.
+
+Vehicle/application behavior still depends on correct vehicle profile, baud rate, protocol, ignition state, and wiring.
+
+## Safety Notes
+
+- Datalog first; do not flash first.
+- Keep a battery charger on the vehicle for longer sessions.
+- Keep the original EvoScan DLL backup.
+- Keep a copy of a known-working replacement DLL.
+- Avoid changing USB driver bindings immediately before a vehicle session.
+
+Restore the original EvoScan DLL with:
+
+```bat
+copy /Y "C:\Program Files (x86)\EvoScan\EvoScan v2.9\op20pt32.dll.tactrix.bak" "C:\Program Files (x86)\EvoScan\EvoScan v2.9\op20pt32.dll"
+```
+
+## Linux Build
+
+Linux support from the upstream project remains available:
+
+```sh
+cd j2534
+make
+```
+
+USB permissions usually require a udev rule similar to:
+
+```text
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTR{idProduct}=="cc4d", GROUP="dialout", MODE="0666"
+```
+
+Your user must be in the `dialout` group or another group with access to the device.

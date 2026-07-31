@@ -17,8 +17,8 @@
 #ifndef OP2J2534_H
     #define OP2J2534_H
 
-const char *DLL_VERSION = "3.0.0";
-const char *API_VERSION = "04.04";
+static const char *DLL_VERSION = "3.0.1-dev";
+static const char *API_VERSION = "04.04";
 
 #define PM_DATA_LEN	4128 // Maixmum length of data in a PASSTHRU_MSG
 
@@ -30,6 +30,12 @@ const char *API_VERSION = "04.04";
   #endif
 #else
   #define OP2J2534_API
+#endif
+
+#ifdef _WIN32
+  #define OP2J2534_CALL __stdcall
+#else
+  #define OP2J2534_CALL
 #endif
 
 #ifndef FALSE
@@ -121,39 +127,45 @@ typedef struct _PASSTHRU_MSG
     unsigned char Data[PM_DATA_LEN];
 } PASSTHRU_MSG;
 
-OP2J2534_API int32_t PassThruOpen(
+typedef struct _SBYTE_ARRAY
+{
+    unsigned long NumOfBytes;
+    unsigned char *BytePtr;
+} SBYTE_ARRAY;
+
+OP2J2534_API int32_t OP2J2534_CALL PassThruOpen(
     const void *pName, unsigned long *pDeviceID);
-OP2J2534_API int32_t PassThruClose(
+OP2J2534_API int32_t OP2J2534_CALL PassThruClose(
     const unsigned long DeviceID);
-OP2J2534_API int32_t PassThruConnect(
+OP2J2534_API int32_t OP2J2534_CALL PassThruConnect(
     const unsigned long DeviceID, const unsigned long ProtocolID, const unsigned long Flags,
     const unsigned long Baudrate, unsigned long *pChannelID);
-OP2J2534_API int32_t PassThruDisconnect(
+OP2J2534_API int32_t OP2J2534_CALL PassThruDisconnect(
     const unsigned long ChannelID);
-OP2J2534_API int32_t PassThruReadMsgs(
+OP2J2534_API int32_t OP2J2534_CALL PassThruReadMsgs(
     const unsigned long ChannelID, PASSTHRU_MSG *pMsg,
     unsigned long *pNumMsgs, const unsigned long Timeout);
-OP2J2534_API int32_t PassThruWriteMsgs(
+OP2J2534_API int32_t OP2J2534_CALL PassThruWriteMsgs(
     const unsigned long ChannelID, const PASSTHRU_MSG *pMsg,
     unsigned long *pNumMsgs, const unsigned long Timeout);
-OP2J2534_API int32_t PassThruStartPeriodicMsg(
+OP2J2534_API int32_t OP2J2534_CALL PassThruStartPeriodicMsg(
     const unsigned long ChannelID, const PASSTHRU_MSG *pMsg,
     const unsigned long *pMsgID, const unsigned long TimeInterval);
-OP2J2534_API int32_t PassThruStopPeriodicMsg(
+OP2J2534_API int32_t OP2J2534_CALL PassThruStopPeriodicMsg(
     const unsigned long ChannelID, const unsigned long MsgID);
-OP2J2534_API int32_t PassThruStartMsgFilter(
+OP2J2534_API int32_t OP2J2534_CALL PassThruStartMsgFilter(
     const unsigned long ChannelID, unsigned long FilterType,
     const PASSTHRU_MSG *pMaskMsg, const PASSTHRU_MSG *pPatternMsg,
     const PASSTHRU_MSG *pFlowControlMsg, unsigned long *pMsgID);
-OP2J2534_API int32_t PassThruStopMsgFilter(
+OP2J2534_API int32_t OP2J2534_CALL PassThruStopMsgFilter(
     const unsigned long ChannelID, const unsigned long MsgID);
-OP2J2534_API int32_t PassThruSetProgrammingVoltage(
+OP2J2534_API int32_t OP2J2534_CALL PassThruSetProgrammingVoltage(
     const unsigned long DeviceID, const unsigned long Pin, const unsigned long Voltage);
-OP2J2534_API int32_t PassThruReadVersion(
-    const unsigned long DeviceID, char *pApiVersion, char *pDllVersion, char *pFirmwareVersion);
-OP2J2534_API int32_t PassThruGetLastError(
+OP2J2534_API int32_t OP2J2534_CALL PassThruReadVersion(
+    const unsigned long DeviceID, char *pFirmwareVersion, char *pDllVersion, char *pApiVersion);
+OP2J2534_API int32_t OP2J2534_CALL PassThruGetLastError(
     char *pErrorDescription);
-OP2J2534_API int32_t PassThruIoctl(
+OP2J2534_API int32_t OP2J2534_CALL PassThruIoctl(
     const unsigned long ChannelID, const unsigned long IoctlID, const void *pInput, void *pOutput);
 
 #ifdef __cplusplus
