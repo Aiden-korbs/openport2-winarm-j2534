@@ -69,11 +69,11 @@ libusb\MS32\Release\dll\libusb-1.0.dll
 Build from an x86 developer command prompt or normal Administrator Command Prompt:
 
 ```bat
-cd /d C:\Users\Aiden\Desktop\j2534
+cd /d C:\path\to\openport2-winarm-j2534
 "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\MSBuild\Current\Bin\MSBuild.exe" j2534.sln /p:Configuration=Release /p:Platform=x86
 ```
 
-If your Visual Studio install uses a different MSBuild path, adjust the command. The solution platform is `x86`, not `Win32`.
+If your Visual Studio install uses a different MSBuild path or version, adjust the command. The solution platform is `x86`, not `Win32`.
 
 If the project complains about an unavailable platform toolset, retarget `j2534\j2534.vcxproj` to the installed toolset, for example `v145`.
 
