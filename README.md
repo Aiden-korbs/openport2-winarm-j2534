@@ -16,6 +16,7 @@ Tested target setups:
 - 32-bit x86 build of this DLL
 - 32-bit x86 `libusb-1.0.dll`
 - EvoScan 2.9 using this DLL as `op20pt32.dll`
+- Honda HDS/I-HDS diagnostics on a 2005 CR-V over ISO9141/K-line after the KWP checksum compatibility fix
 
 Do not use this fork for ECU flashing unless you have independently validated it for your exact vehicle, VM, USB path, and application. Current focus is diagnostics and datalogging.
 
@@ -46,7 +47,7 @@ Tactrix, OpenPort, EvoScan, EcuFlash, Honda, Mitsubishi, and other product names
 - EvoScan/OpenPort compatibility work, including `READ_VBATT` / `READ_PROG_VOLTAGE` before channel connect and experimental `FIVE_BAUD_INIT` support.
 - Optional Windows J2534 registry helper for a K-line-only OpenPort alias.
 - Diagnostic logging on DLL load and J2534 calls via `LOG_ENABLE`.
-- Native macOS ARM64 OpenPort ISO9141/K-line tester and safe generic OBD scanner.
+- Native macOS ARM64 OpenPort ISO9141/K-line tester, safe generic OBD scanner, large read-only probe, and HDS-observed Honda K-line probe.
 
 ## Why ARM Needs This
 
@@ -250,6 +251,12 @@ To run the larger read-only probe intended to find non-generic/ECU-specific data
 extras/build_run_macos_openport_iso9141_probe.sh
 ```
 
+To replay the read/status-style Honda HDS K-line requests that were observed working through I-HDS/HDS, including the requests that returned VIN and ECU calibration ID:
+
+```sh
+extras/build_run_macos_openport_iso9141_hds_probe.sh
+```
+
 The large probe writes `extras/macos_openport_probe_YYYYMMDD_HHMMSS.log`. To quickly inspect only useful responses:
 
 ```sh
@@ -258,6 +265,13 @@ grep '^HIT' extras/macos_openport_probe_*.log | grep -v 'negative_for='
 ```
 
 The large probe can take 30 minutes or more because most unknown identifiers will time out rather than answer.
+
+The HDS-style probe writes `extras/macos_openport_hds_probe_YYYYMMDD_HHMMSS.log`. Useful filters:
+
+```sh
+grep '^HIT_HDS' extras/macos_openport_hds_probe_*.log
+grep 'strings=' extras/macos_openport_hds_probe_*.log
+```
 
 The tester performs the same K-line setup used by the Windows tester:
 
@@ -294,13 +308,27 @@ The larger probe also skips reset, security, write, clear, output-control, routi
 - KWP/UDS `22 F100..F11F`, `22 F180..F19F`, and `22 0000..00FF`: common read-data identifiers.
 - DTC read candidates `17`, `18`, and `19` forms only; no clear-DTC requests.
 
+The HDS-style probe is not an open-ended command sweep. It replays a curated set of read/status-style Honda K-line frames observed in successful HDS logs. On the tested CR-V, these HDS-observed requests returned:
+
+- `25 04 E2 F5`: VIN `JHLRD77806C202401`.
+- `7D 06 32 01 00 4A`: ECU/calibration string `37805-PPA-Q120`.
+- Several `25 07 72 ...` records used by HDS for Honda-specific status/live data.
+
 ## Honda HDS / I-HDS Notes
 
 Honda HDS/I-HDS may list J2534 providers from the Windows registry but still prefer Honda/SPX-specific provider names or capability flags. The HDS SPX MVCI patcher references this registry key:
 
-Current I-HDS status: I-HDS can be launched with the patched DLL and can reach the VCI selection/VCI connection stage using OpenPort 2.0, but it does not successfully communicate with the tested 2005 CR-V. The J2534 log shows I-HDS connecting/probing ISO15765/CAN at `500000` baud (`protocolID: 6`) instead of using the working ISO9141/K-line path (`protocolID: 3`, `10400` baud, five-baud init `0x33`). Treat I-HDS as not working for this vehicle/interface path for now; EvoScan and the native macOS tester prove the OpenPort/K-line vehicle transport itself works.
+Current HDS/I-HDS status: HDS/I-HDS diagnostics are confirmed working with this patched DLL on the tested 2005 Honda CR-V over ISO9141/K-line. The application still probes many ISO15765/CAN paths first, so startup/system selection can be slow, but it eventually reaches the working path: `protocolID: 3`, `10400` baud, `FIVE_BAUD_INIT 0x33`.
 
-Later HDS logs did show one ISO9141 attempt: `protocolID: 3`, `10400` baud, `FIVE_BAUD_INIT 0x33`, followed by a KWP-style tester-present frame `80 46 F0 02 3E 02`. That frame is length-coded and does not include the trailing checksum byte, so the DLL now appends a checksum only for ISO9141/ISO14230 KWP format-byte messages where the encoded length proves the checksum is absent. Already-checksummed frames, including the known-good EvoScan generic OBD frames, are left unchanged.
+The key HDS compatibility fix is KWP checksum handling. HDS sent a KWP-style tester-present frame `80 46 F0 02 3E 02` without the trailing checksum byte. The DLL now appends a checksum only for ISO9141/ISO14230 KWP format-byte messages where the encoded length proves the checksum is absent. Already-checksummed frames, including known-good EvoScan generic OBD frames, are left unchanged.
+
+Confirmed HDS/I-HDS read results from the tested CR-V include:
+
+- VIN: `JHLRD77806C202401` from Honda K-line request `25 04 E2 F5`.
+- ECU/calibration string: `37805-PPA-Q120` from Honda K-line request `7D 06 32 01 00 4A`.
+- Honda-specific status/live data over repeated `25 07 72 ...` K-line requests.
+
+This confirms diagnostics/live data, not ECU ROM dumping or flashing. Do not use HDS/I-HDS rewrite/flashing functions through this fork unless you have independently validated the exact ECU, protocol, backup, and recovery process.
 
 ```text
 HKLM\SOFTWARE\WOW6432Node\PassThruSupport.04.04\SPX-Device1

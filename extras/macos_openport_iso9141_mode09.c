@@ -19,6 +19,12 @@ typedef struct openport {
     uint8_t ep_out;
 } openport_t;
 
+typedef struct honda_hds_request {
+    const char *label;
+    uint8_t data[16];
+    int len;
+} honda_hds_request_t;
+
 static void print_hex(const uint8_t *data, int len)
 {
     for (int i = 0; i < len; i++) {
@@ -57,6 +63,15 @@ static int checksum_ok(const uint8_t *data, int len)
     if (len < 2) return 0;
     for (int i = 0; i < len - 1; i++) sum = (uint8_t)(sum + data[i]);
     return sum == data[len - 1];
+}
+
+static int checksum_sum_zero_ok(const uint8_t *data, int len)
+{
+    uint8_t sum = 0;
+
+    if (len < 2) return 0;
+    for (int i = 0; i < len; i++) sum = (uint8_t)(sum + data[i]);
+    return sum == 0;
 }
 
 static int bulk_write(openport_t *op, const uint8_t *data, int len, unsigned int timeout_ms)
@@ -493,6 +508,30 @@ static void print_payload_ascii(const uint8_t *data, int len)
     for (int i = 0; i < len; i++) putchar(isprint(data[i]) ? data[i] : '.');
 }
 
+static void print_ascii_runs(const uint8_t *data, int len)
+{
+    int found = 0;
+    int start = -1;
+
+    for (int i = 0; i <= len; i++) {
+        if (i < len && isprint(data[i])) {
+            if (start < 0) start = i;
+            continue;
+        }
+
+        if (start >= 0 && i - start >= 4) {
+            if (found) printf(",");
+            printf("\"");
+            for (int j = start; j < i; j++) putchar(data[j]);
+            printf("\"");
+            found = 1;
+        }
+        start = -1;
+    }
+
+    if (!found) printf("(none)");
+}
+
 static const char *negative_response_name(uint8_t nrc)
 {
     switch (nrc) {
@@ -565,6 +604,46 @@ static int query_payload_raw(openport_t *op, const uint8_t *payload, int payload
     }
 
     if (!responses) printf("MISS label=\"%s\"\n", label);
+    usleep(pause_us);
+    return responses;
+}
+
+static int query_hds_frame(openport_t *op, const uint8_t *frame, int frame_len,
+    const char *label, unsigned int timeout_ms, int idle_reads, unsigned int pause_us)
+{
+    uint8_t response[BUF_LEN];
+    int response_len = 0;
+    int responses = 0;
+
+    printf("REQ_HDS label=\"%s\" frame=", label);
+    print_hex(frame, frame_len);
+    printf(" checksum=sum0:%s\n", checksum_sum_zero_ok(frame, frame_len) ? "OK" : "BAD");
+
+    if (write_frame(op, frame, frame_len) != 0) {
+        printf("ERR_HDS label=\"%s\" write_failed\n", label);
+        return -1;
+    }
+
+    for (;;) {
+        int r = read_one_ecu_response_timeout(op, response, &response_len, timeout_ms, idle_reads);
+        if (r < 0) {
+            printf("ERR_HDS label=\"%s\" read_failed\n", label);
+            return responses ? responses : -1;
+        }
+        if (r == 0) break;
+
+        responses++;
+        printf("HIT_HDS label=\"%s\" response=", label);
+        print_hex(response, response_len);
+        printf(" checksum=sum0:%s", checksum_sum_zero_ok(response, response_len) ? "OK" : "BAD");
+        printf(" ascii=");
+        print_payload_ascii(response, response_len);
+        printf(" strings=");
+        print_ascii_runs(response, response_len);
+        printf("\n");
+    }
+
+    if (!responses) printf("MISS_HDS label=\"%s\"\n", label);
     usleep(pause_us);
     return responses;
 }
@@ -710,24 +789,74 @@ static void run_large_probe(openport_t *op)
     printf("\n=== LARGE PROBE COMPLETE ===\n");
 }
 
+static void run_honda_hds_probe(openport_t *op)
+{
+    static const honda_hds_request_t requests[] = {
+        { "HDS VIN", { 0x25, 0x04, 0xE2, 0xF5 }, 4 },
+        { "HDS calibration ID", { 0x7D, 0x06, 0x32, 0x01, 0x00, 0x4A }, 6 },
+        { "HDS status 72 00 00 05", { 0x25, 0x07, 0x72, 0x00, 0x00, 0x05, 0x5D }, 7 },
+        { "HDS status 72 00 00 01", { 0x25, 0x07, 0x72, 0x00, 0x00, 0x01, 0x61 }, 7 },
+        { "HDS status 72 00 05 01", { 0x25, 0x07, 0x72, 0x00, 0x05, 0x01, 0x5C }, 7 },
+        { "HDS live 72 17 05 01", { 0x25, 0x07, 0x72, 0x17, 0x05, 0x01, 0x45 }, 7 },
+        { "HDS live 72 17 00 02", { 0x25, 0x07, 0x72, 0x17, 0x00, 0x02, 0x49 }, 7 },
+        { "HDS read 71 17", { 0x25, 0x05, 0x71, 0x17, 0x4E }, 5 },
+        { "HDS read 71 33", { 0x25, 0x05, 0x71, 0x33, 0x32 }, 5 },
+        { "HDS read 73 01", { 0x25, 0x05, 0x73, 0x01, 0x62 }, 5 },
+        { "HDS read 74 01", { 0x25, 0x05, 0x74, 0x01, 0x61 }, 5 },
+        { "HDS data 72 39 00 01", { 0x25, 0x07, 0x72, 0x39, 0x00, 0x01, 0x28 }, 7 },
+        { "HDS data 72 17 00 16", { 0x25, 0x07, 0x72, 0x17, 0x00, 0x16, 0x35 }, 7 },
+        { "HDS data 72 18 00 0E", { 0x25, 0x07, 0x72, 0x18, 0x00, 0x0E, 0x3C }, 7 },
+        { "HDS data 72 D4 10 0B", { 0x25, 0x07, 0x72, 0xD4, 0x10, 0x0B, 0x73 }, 7 },
+        { "HDS data 72 29 00 09", { 0x25, 0x07, 0x72, 0x29, 0x00, 0x09, 0x30 }, 7 },
+        { "HDS data 72 D0 00 1D", { 0x25, 0x07, 0x72, 0xD0, 0x00, 0x1D, 0x75 }, 7 },
+        { "HDS data 72 2B 00 04", { 0x25, 0x07, 0x72, 0x2B, 0x00, 0x04, 0x33 }, 7 },
+        { "HDS data 72 D1 00 12", { 0x25, 0x07, 0x72, 0xD1, 0x00, 0x12, 0x7F }, 7 },
+        { "HDS data 72 55 00 07", { 0x25, 0x07, 0x72, 0x55, 0x00, 0x07, 0x06 }, 7 },
+        { "HDS data 72 33 00 02", { 0x25, 0x07, 0x72, 0x33, 0x00, 0x02, 0x2D }, 7 },
+        { "HDS data 72 D3 00 14", { 0x25, 0x07, 0x72, 0xD3, 0x00, 0x14, 0x7B }, 7 },
+        { "HDS data 72 F0 00 04", { 0x25, 0x07, 0x72, 0xF0, 0x00, 0x04, 0x6E }, 7 },
+        { "HDS data 72 E0 10 01", { 0x25, 0x07, 0x72, 0xE0, 0x10, 0x01, 0x71 }, 7 },
+        { "HDS data 72 D2 07 0E", { 0x25, 0x07, 0x72, 0xD2, 0x07, 0x0E, 0x7B }, 7 },
+        { "HDS data 72 E8 00 12", { 0x25, 0x07, 0x72, 0xE8, 0x00, 0x12, 0x68 }, 7 },
+        { "HDS data 72 CF 04 01", { 0x25, 0x07, 0x72, 0xCF, 0x04, 0x01, 0x8E }, 7 },
+        { "HDS data 72 33 00 01", { 0x25, 0x07, 0x72, 0x33, 0x00, 0x01, 0x2E }, 7 },
+        { "HDS data 72 41 00 01", { 0x25, 0x07, 0x72, 0x41, 0x00, 0x01, 0x20 }, 7 },
+        { "HDS data 72 48 00 01", { 0x25, 0x07, 0x72, 0x48, 0x00, 0x01, 0x19 }, 7 },
+        { "HDS data 72 0A 00 01", { 0x25, 0x07, 0x72, 0x0A, 0x00, 0x01, 0x57 }, 7 },
+    };
+    time_t now = time(NULL);
+
+    printf("\n=== HONDA HDS-OBSERVED READ-ONLY K-LINE PROBE ===\n");
+    printf("timestamp=%ld\n", (long)now);
+    printf("Safety: this replays read/status-style Honda K-line requests observed in successful HDS logs. It does not send clear, write, reset, security, routine-control, or output-control requests.\n");
+
+    for (size_t i = 0; i < sizeof(requests) / sizeof(requests[0]); i++) {
+        query_hds_frame(op, requests[i].data, requests[i].len, requests[i].label, 220, 8, 120000);
+    }
+
+    printf("\n=== HONDA HDS PROBE COMPLETE ===\n");
+}
+
 int main(int argc, char **argv)
 {
     openport_t op;
     uint8_t wake[6];
     int scan = 0;
     int probe = 0;
+    int hds_probe = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--scan") == 0) scan = 1;
         else if (strcmp(argv[i], "--probe") == 0) probe = 1;
+        else if (strcmp(argv[i], "--hds-probe") == 0) hds_probe = 1;
         else {
-            fprintf(stderr, "Usage: %s [--scan|--probe]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [--scan|--probe|--hds-probe]\n", argv[0]);
             return 2;
         }
     }
 
-    if (scan && probe) {
-        fprintf(stderr, "Use only one mode at a time: --scan or --probe\n");
+    if ((scan ? 1 : 0) + (probe ? 1 : 0) + (hds_probe ? 1 : 0) > 1) {
+        fprintf(stderr, "Use only one mode at a time: --scan, --probe, or --hds-probe\n");
         return 2;
     }
 
@@ -762,6 +891,12 @@ int main(int argc, char **argv)
 
     if (probe) {
         run_large_probe(&op);
+        close_openport(&op);
+        return 0;
+    }
+
+    if (hds_probe) {
+        run_honda_hds_probe(&op);
         close_openport(&op);
         return 0;
     }
