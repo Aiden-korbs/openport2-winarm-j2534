@@ -1,26 +1,44 @@
 # OpenPort 2.0 ARM Diagnostics
 
-This is an ARM-focused OpenPort 2.0 diagnostics project based on `j2534`, a libusb-based SAE J2534-1 library for the Tactrix OpenPort 2.0 cable.
+An ARM-focused fork of `j2534`, a libusb-based SAE J2534-1 library for the Tactrix OpenPort 2.0 cable.
 
 The project has two related goals:
 
 - Make OpenPort 2.0 usable from 32-bit x86 diagnostic applications running under Windows 11 ARM emulation, where the original Tactrix x86/x64 kernel driver cannot be loaded.
 - Provide native Apple Silicon/macOS command-line diagnostics that talk directly to OpenPort 2.0 through libusb.
 
-Tested target setups:
+**Current focus is diagnostics and datalogging.** Do not use this fork for ECU flashing unless you have independently validated it for your exact vehicle, VM, USB path, and application.
+
+## Contents
+
+- [Tested Setups](#tested-setups)
+- [Attribution & Dependencies](#attribution--dependencies)
+- [What This Fork Adds](#what-this-fork-adds)
+- [Why ARM Needs This](#why-arm-needs-this)
+- [Build On Windows ARM](#build-on-windows-arm)
+- [OpenPort Driver Setup](#openport-driver-setup)
+- [Generic J2534 Install](#generic-j2534-install)
+- [EvoScan 2.9 Install](#evoscan-29-install)
+- [Native macOS Apple Silicon Tester](#native-macos-apple-silicon-tester)
+- [Honda HDS / I-HDS Notes](#honda-hds--i-hds-notes)
+- [Honda Tuning Suite Notes](#honda-tuning-suite-notes)
+- [Logging](#logging)
+- [Known Working Result](#known-working-result)
+- [Safety Notes](#safety-notes)
+- [Linux Build](#linux-build)
+
+## Tested Setups
 
 - Apple Silicon Mac running native macOS ARM64 tools with Homebrew `libusb`.
-- Apple Silicon Mac running a Windows 11 ARM VM
-- OpenPort 2.0 USB device attached to the VM
-- OpenPort bound to Microsoft WinUSB with Zadig
-- 32-bit x86 build of this DLL
-- 32-bit x86 `libusb-1.0.dll`
-- EvoScan 2.9 using this DLL as `op20pt32.dll`
-- Honda HDS/I-HDS diagnostics on a 2005 CR-V over ISO9141/K-line after the KWP checksum compatibility fix
+- Apple Silicon Mac running a Windows 11 ARM VM, with:
+  - OpenPort 2.0 USB device attached to the VM
+  - OpenPort bound to Microsoft WinUSB with Zadig
+  - 32-bit x86 build of this DLL
+  - 32-bit x86 `libusb-1.0.dll`
+  - EvoScan 2.9 using this DLL as `op20pt32.dll`
+  - Honda HDS/I-HDS diagnostics on a 2005 CR-V over ISO9141/K-line after the KWP checksum compatibility fix
 
-Do not use this fork for ECU flashing unless you have independently validated it for your exact vehicle, VM, USB path, and application. Current focus is diagnostics and datalogging.
-
-## Attribution
+## Attribution & Dependencies
 
 This fork is based on the original project:
 
@@ -63,7 +81,7 @@ Install Build Tools for Visual Studio and the Desktop C++ workload.
 
 The all-in-one installer can download and extract libusb automatically if 7-Zip is installed. The repo does not vendor libusb binaries; it downloads the official libusb release and verifies the SHA-256 hash before copying the needed x86 files into place.
 
-Manual libusb setup is also supported. Download the Windows libusb release archive from:
+**Manual libusb setup** is also supported. Download the Windows libusb release archive from:
 
 ```text
 https://github.com/libusb/libusb/releases
@@ -135,13 +153,15 @@ The installer will build `Release|x86` if needed, copy the DLLs to `C:\J2534\Ope
 
 Before changing anything, the installer checks for the common missing pieces: libusb layout, 7-Zip, MSBuild, and the Visual Studio Desktop C++ workload. If something is missing, it prints the exact install commands to run.
 
-To only check prerequisites, use:
+**Useful flags:**
 
-```bat
-extras\install_windows_arm.cmd -CheckOnly
-```
-
-To let the installer use `winget` for missing prerequisites such as 7-Zip or Visual Studio Build Tools with the Desktop C++ workload, use:
+| Flag | Effect |
+|---|---|
+| `-CheckOnly` | Only check prerequisites, don't install anything |
+| `-InstallMissingPrereqs` | Let the installer use `winget` for missing prerequisites (7-Zip, VS Build Tools + Desktop C++ workload) |
+| `-NoBuild` | Install an already-built DLL without rebuilding |
+| `-NoEvoScan` | Skip modifying EvoScan |
+| `-NoLibusbDownload` | Require libusb files to already exist locally; don't auto-download |
 
 ```bat
 extras\install_windows_arm.cmd -InstallMissingPrereqs -EvoScanDir "C:\Program Files (x86)\EvoScan\EvoScan v2.9"
@@ -151,25 +171,7 @@ If Build Tools or 7-Zip were just installed, close and reopen the Administrator 
 
 If the required libusb files are missing, the installer downloads the official libusb release from GitHub, verifies its SHA-256 hash, extracts it with 7-Zip, and copies the x86 files into the expected repo layout.
 
-If PowerShell script execution is blocked, use the `.cmd` launcher above. It runs PowerShell with `-ExecutionPolicy Bypass` for that one invocation only.
-
-If you already have a built DLL and only want to install it, use:
-
-```bat
-extras\install_windows_arm.cmd -NoBuild
-```
-
-If you do not want to modify EvoScan, use:
-
-```bat
-extras\install_windows_arm.cmd -NoEvoScan
-```
-
-If you want to prevent automatic libusb downloading and require the files to already exist locally, use:
-
-```bat
-extras\install_windows_arm.cmd -NoLibusbDownload
-```
+If PowerShell script execution is blocked, use the `.cmd` launcher above — it runs PowerShell with `-ExecutionPolicy Bypass` for that one invocation only.
 
 After building, run from an Administrator Command Prompt:
 
@@ -200,7 +202,7 @@ Before running the EvoScan installer on a fresh Windows ARM VM, enable the legac
 extras\prepare_evoscan_windows_arm.cmd
 ```
 
-This enables `.NET Framework 3.5`, which includes `.NET 2.0`. If the EvoScan installer asks to download `.NET Framework 2.0` from the web, click `No`; use the Windows feature instead.
+This enables `.NET Framework 3.5`, which includes `.NET 2.0`. If the EvoScan installer asks to download `.NET Framework 2.0` from the web, click `No` — use the Windows feature instead.
 
 Run from an Administrator Command Prompt:
 
@@ -239,39 +241,14 @@ Attach the OpenPort USB device to macOS, not the Windows VM, then run:
 extras/build_run_macos_openport_iso9141_mode09.sh
 ```
 
-To run the safe read-only generic OBD scanner and write a timestamped log:
+**Available scripts:**
 
-```sh
-extras/build_run_macos_openport_iso9141_scan.sh
-```
-
-To run the larger read-only probe intended to find non-generic/ECU-specific data that the generic OBD scanner missed:
-
-```sh
-extras/build_run_macos_openport_iso9141_probe.sh
-```
-
-To replay the read/status-style Honda HDS K-line requests that were observed working through I-HDS/HDS, including the requests that returned VIN and ECU calibration ID:
-
-```sh
-extras/build_run_macos_openport_iso9141_hds_probe.sh
-```
-
-The large probe writes `extras/macos_openport_probe_YYYYMMDD_HHMMSS.log`. To quickly inspect only useful responses:
-
-```sh
-grep '^HIT' extras/macos_openport_probe_*.log
-grep '^HIT' extras/macos_openport_probe_*.log | grep -v 'negative_for='
-```
-
-The large probe can take 30 minutes or more because most unknown identifiers will time out rather than answer.
-
-The HDS-style probe writes `extras/macos_openport_hds_probe_YYYYMMDD_HHMMSS.log`. Useful filters:
-
-```sh
-grep '^HIT_HDS' extras/macos_openport_hds_probe_*.log
-grep 'strings=' extras/macos_openport_hds_probe_*.log
-```
+| Script | Purpose |
+|---|---|
+| `build_run_macos_openport_iso9141_mode09.sh` | Basic ISO9141/K-line connection test |
+| `build_run_macos_openport_iso9141_scan.sh` | Safe read-only generic OBD scan, writes a timestamped log |
+| `build_run_macos_openport_iso9141_probe.sh` | Larger read-only probe for non-generic/ECU-specific data |
+| `build_run_macos_openport_iso9141_hds_probe.sh` | Replays HDS-observed Honda K-line requests |
 
 The tester performs the same K-line setup used by the Windows tester:
 
@@ -282,11 +259,7 @@ The tester performs the same K-line setup used by the Windows tester:
 - five-baud init with address `0x33`
 - Mode 01 and Mode 09 OBD requests
 
-On the tested 2005 CR-V, generic Mode 01 works and Mode 09 PID `00` responds. The corrected native scanner also found Mode 09 calibration/CVN data over generic OBD:
-
-- `09 04`: multi-frame calibration ID pieces, reconstructing as `37805-PPA-Q120`, `37850-RCA-A100` from returned text fragments.
-- `09 06`: CVN bytes `4A FC 69 88`.
-- `09 02`: VIN did not respond.
+### Generic OBD Scanner
 
 The safe scanner exhausts these read-only generic OBD services over ISO9141/K-line:
 
@@ -301,14 +274,38 @@ The safe scanner exhausts these read-only generic OBD services over ISO9141/K-li
 
 It intentionally skips destructive/control services such as `04` Clear DTC and `08` Control Operation.
 
-The larger probe also skips reset, security, write, clear, output-control, routine-control, and session-control services. In addition to the generic OBD scan above, it tries read/status style services that can expose ECU-specific data on older K-line ECUs:
+On the tested 2005 CR-V, generic Mode 01 works and Mode 09 PID `00` responds. The scanner also found Mode 09 calibration/CVN data:
+
+- `09 04`: multi-frame calibration ID pieces, reconstructing as `37805-PPA-Q120`, `37850-RCA-A100` from returned text fragments.
+- `09 06`: CVN bytes `4A FC 69 88`.
+- `09 02`: VIN did not respond.
+
+### Larger Probe
+
+The larger probe also skips reset, security, write, clear, output-control, routine-control, and session-control services. In addition to the generic OBD scan above, it tries read/status-style services that can expose ECU-specific data on older K-line ECUs:
 
 - KWP/Honda `1A 80..9F`: ECU identification records.
 - KWP/Honda `21 00..FF`: local data identifiers.
 - KWP/UDS `22 F100..F11F`, `22 F180..F19F`, and `22 0000..00FF`: common read-data identifiers.
 - DTC read candidates `17`, `18`, and `19` forms only; no clear-DTC requests.
 
-The HDS-style probe is not an open-ended command sweep. It replays a curated set of read/status-style Honda K-line frames observed in successful HDS logs. On the tested CR-V, these HDS-observed requests returned:
+It writes `extras/macos_openport_probe_YYYYMMDD_HHMMSS.log` and can take 30 minutes or more, since most unknown identifiers will time out rather than answer. To quickly inspect only useful responses:
+
+```sh
+grep '^HIT' extras/macos_openport_probe_*.log
+grep '^HIT' extras/macos_openport_probe_*.log | grep -v 'negative_for='
+```
+
+### HDS-Style Probe
+
+The HDS-style probe is not an open-ended command sweep. It replays a curated set of read/status-style Honda K-line frames observed in successful HDS logs. It writes `extras/macos_openport_hds_probe_YYYYMMDD_HHMMSS.log`. Useful filters:
+
+```sh
+grep '^HIT_HDS' extras/macos_openport_hds_probe_*.log
+grep 'strings=' extras/macos_openport_hds_probe_*.log
+```
+
+On the tested CR-V, these HDS-observed requests returned:
 
 - `25 04 E2 F5`: VIN response confirmed; full VIN redacted from public docs.
 - `7D 06 32 01 00 4A`: ECU/calibration string `37805-PPA-Q120`.
@@ -318,7 +315,11 @@ The HDS-style probe is not an open-ended command sweep. It replays a curated set
 
 Honda HDS/I-HDS may list J2534 providers from the Windows registry but still prefer Honda/SPX-specific provider names or capability flags. The HDS SPX MVCI patcher references this registry key:
 
-Current HDS/I-HDS status: HDS/I-HDS diagnostics are confirmed working with this patched DLL on the tested 2005 Honda CR-V over ISO9141/K-line. The application still probes many ISO15765/CAN paths first, so startup/system selection can be slow, but it eventually reaches the working path: `protocolID: 3`, `10400` baud, `FIVE_BAUD_INIT 0x33`.
+```text
+HKLM\SOFTWARE\WOW6432Node\PassThruSupport.04.04\SPX-Device1
+```
+
+**Current status:** HDS/I-HDS diagnostics are confirmed working with this patched DLL on the tested 2005 Honda CR-V over ISO9141/K-line. The application still probes many ISO15765/CAN paths first, so startup/system selection can be slow, but it eventually reaches the working path: `protocolID: 3`, `10400` baud, `FIVE_BAUD_INIT 0x33`.
 
 The key HDS compatibility fix is KWP checksum handling. HDS sent a KWP-style tester-present frame `80 46 F0 02 3E 02` without the trailing checksum byte. The DLL now appends a checksum only for ISO9141/ISO14230 KWP format-byte messages where the encoded length proves the checksum is absent. Already-checksummed frames, including known-good EvoScan generic OBD frames, are left unchanged.
 
@@ -330,11 +331,9 @@ Confirmed HDS/I-HDS read results from the tested CR-V include:
 
 This confirms diagnostics/live data, not ECU ROM dumping or flashing. Do not use HDS/I-HDS rewrite/flashing functions through this fork unless you have independently validated the exact ECU, protocol, backup, and recovery process.
 
-```text
-HKLM\SOFTWARE\WOW6432Node\PassThruSupport.04.04\SPX-Device1
-```
+### Registering Honda Aliases
 
-After installing this fork, you can add Honda-compatible alias entries with:
+After installing this fork, add Honda-compatible alias entries with:
 
 ```bat
 extras\register_honda_aliases_windows_arm.cmd
@@ -350,13 +349,17 @@ extras\register_kline_only_alias_windows_arm.cmd
 
 This creates `OpenPort 2.0 ISO9141 K-Line` with `ISO9141=1`, `ISO14230=1`, `CAN=0`, and `ISO15765=0`. It does not remove or modify the normal all-protocol OpenPort provider. This may help applications that choose protocol/provider from registry capability flags, but it will not fix applications that are hard-coded to probe CAN for the selected vehicle.
 
+### Launching I-HDS
+
 For I-HDS D-PDU testing, launch I-HDS with logging set in the process environment instead of relying only on machine-wide environment propagation:
 
 ```bat
 extras\launch_ihds_with_openport_logging.cmd
 ```
 
-By default this runs `C:\i-HDS\Launcher.exe -selector`, which opens the same Diagnostic System selection menu as `C:\Users\Public\Desktop\Diagnostic System.lnk`. The launcher starts I-HDS with the executable's directory as the working directory and prepends `C:\J2534\OpenPort` to `PATH` so `ppl_j2534.exe` can resolve `libusb-1.0.dll` after loading `j2534.dll`. This matters because the Eclipse/Java application loads native helper DLLs during startup. If I-HDS fails before opening with an error like `UnsatisfiedLinkError: ca.beq.util.win32.registry.RegistryKey.testInitialized()V`, that is a Java registry JNI startup problem, not an OpenPort/J2534 problem.
+By default this runs `C:\i-HDS\Launcher.exe -selector`, which opens the same Diagnostic System selection menu as `C:\Users\Public\Desktop\Diagnostic System.lnk`. The launcher starts I-HDS with the executable's directory as the working directory and prepends `C:\J2534\OpenPort` to `PATH` so `ppl_j2534.exe` can resolve `libusb-1.0.dll` after loading `j2534.dll`. This matters because the Eclipse/Java application loads native helper DLLs during startup.
+
+If I-HDS fails before opening with an error like `UnsatisfiedLinkError: ca.beq.util.win32.registry.RegistryKey.testInitialized()V`, that is a Java registry JNI startup problem, not an OpenPort/J2534 problem.
 
 To override the target manually, pass the executable and arguments explicitly:
 
@@ -364,7 +367,7 @@ To override the target manually, pass the executable and arguments explicitly:
 extras\launch_ihds_with_openport_logging.cmd "C:\i-HDS\Launcher.exe" -selector
 ```
 
-ProcMon may show `ppl_j2534.exe` reading the J2534 registry entries and successfully loading `C:\J2534\OpenPort\j2534.dll` before any vehicle communication happens. If `C:\J2534\op2.log` still remains empty after launching this way, the problem is no longer DLL discovery; I-HDS/D-PDU loaded the DLL but has not called into the OpenPort J2534 implementation yet.
+ProcMon may show `ppl_j2534.exe` reading the J2534 registry entries and successfully loading `C:\J2534\OpenPort\j2534.dll` before any vehicle communication happens. If `C:\J2534\op2.log` still remains empty after launching this way, the problem is no longer DLL discovery — I-HDS/D-PDU loaded the DLL but has not called into the OpenPort J2534 implementation yet.
 
 ## Honda Tuning Suite Notes
 
@@ -381,6 +384,8 @@ extras\launch_hts_with_openport_logging.cmd "C:\path\to\HTS2.15.exe"
 ```
 
 On the tested 2005 CR-V, HTS can reach the OpenPort J2534 DLL when launched this way, but it chooses ISO15765/CAN at `500000` baud for the tested path instead of the working ISO9141/K-line transport. The K-line-only registry alias is worth testing if HTS exposes it as a selectable J2534 device, but do not assume it will override HTS vehicle/protocol logic.
+
+### Classic HDS (GenRad SysNav)
 
 For older vehicles that use classic HDS rather than the i-HDS Eclipse workflow, use the GenRad SysNav launcher first:
 
@@ -408,7 +413,17 @@ This follows the installed Start Menu shortcut `Diagnostic System\Scantool.lnk`,
 extras\register_honda_aliases_windows_arm.cmd -ReplaceGNA600
 ```
 
-Useful ProcMon filters for the I-HDS path are:
+This backs up the existing GNA600 registry key to `C:\J2534\gna600-backup.reg` before repointing it. Restore it with:
+
+```bat
+reg import C:\J2534\gna600-backup.reg
+```
+
+Use HDS/I-HDS for diagnostics first. Do not attempt ECU rewrite/flashing through this fork until communication is proven stable and the required J2534 calls have been verified in logs.
+
+### ProcMon Filters for I-HDS
+
+Useful ProcMon filters for the I-HDS path:
 
 ```text
 Process Name is iHDS.exe
@@ -422,20 +437,6 @@ Path contains D-PDU_API
 Operation is Process Create
 Operation is Load Image
 ```
-
-If you need to test whether HDS/I-HDS is hardwired to the installed GNA600 provider, run:
-
-```bat
-extras\register_honda_aliases_windows_arm.cmd -ReplaceGNA600
-```
-
-This backs up the existing GNA600 registry key to `C:\J2534\gna600-backup.reg` before repointing it. Restore it with:
-
-```bat
-reg import C:\J2534\gna600-backup.reg
-```
-
-Use HDS/I-HDS for diagnostics first. Do not attempt ECU rewrite/flashing through this fork until communication is proven stable and the required J2534 calls have been verified in logs.
 
 ## Logging
 
@@ -454,7 +455,7 @@ View logs with:
 type C:\J2534\op2.log
 ```
 
-For most applications, no log means the application did not load this DLL. For I-HDS/D-PDU, also check ProcMon `Load Image` events because `ppl_j2534.exe` can load the DLL before calling any J2534 entry point that produces a useful runtime log.
+For most applications, no log means the application did not load this DLL. For I-HDS/D-PDU, also check ProcMon `Load Image` events, since `ppl_j2534.exe` can load the DLL before calling any J2534 entry point that produces a useful runtime log.
 
 ## Known Working Result
 
