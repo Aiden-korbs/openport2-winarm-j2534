@@ -310,7 +310,7 @@ The larger probe also skips reset, security, write, clear, output-control, routi
 
 The HDS-style probe is not an open-ended command sweep. It replays a curated set of read/status-style Honda K-line frames observed in successful HDS logs. On the tested CR-V, these HDS-observed requests returned:
 
-- `25 04 E2 F5`: VIN `JHLRD77806C202401`.
+- `25 04 E2 F5`: VIN response confirmed; full VIN redacted from public docs.
 - `7D 06 32 01 00 4A`: ECU/calibration string `37805-PPA-Q120`.
 - Several `25 07 72 ...` records used by HDS for Honda-specific status/live data.
 
@@ -324,7 +324,7 @@ The key HDS compatibility fix is KWP checksum handling. HDS sent a KWP-style tes
 
 Confirmed HDS/I-HDS read results from the tested CR-V include:
 
-- VIN: `JHLRD77806C202401` from Honda K-line request `25 04 E2 F5`.
+- VIN response confirmed from Honda K-line request `25 04 E2 F5`; full VIN redacted from public docs.
 - ECU/calibration string: `37805-PPA-Q120` from Honda K-line request `7D 06 32 01 00 4A`.
 - Honda-specific status/live data over repeated `25 07 72 ...` K-line requests.
 
