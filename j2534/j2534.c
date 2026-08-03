@@ -94,6 +94,7 @@ const uint8_t ISO14230 = 0x34;
 const uint8_t CAN = 0x35;
 const uint8_t ISO15765 = 0x36;
 const unsigned long CAN_29BIT_ID = 0x00000100UL;
+const unsigned long ISO9141_NO_CHECKSUM = 0x00000200UL;
 const unsigned long ISO15765_FRAME_PAD = 0x00000040UL;
 char LAST_ERROR[LE_LEN];
 int littleEndian = TRUE;
@@ -518,6 +519,52 @@ static unsigned long op2_tx_flags(const unsigned long j2534_flags)
 	/* The OpenPort firmware command flags are not a raw J2534 TxFlags bitfield.
 	   Passing ISO15765_FRAME_PAD through to att causes firmware errors on Honda I-HDS. */
 	return j2534_flags & ~ISO15765_FRAME_PAD;
+}
+
+static unsigned long maybe_append_kwp_checksum(const PASSTHRU_MSG *msg, uint8_t *out, unsigned long out_cap)
+{
+	unsigned long len = msg->DataSize;
+	unsigned long expected_without_checksum = 0;
+	unsigned long i = 0;
+	uint8_t format;
+	uint8_t checksum = 0;
+
+	if (len > out_cap)
+		return 0;
+	memcpy(out, msg->Data, len);
+
+	if ((con->channel != ISO9141 && con->channel != ISO14230)
+		|| (msg->TxFlags & ISO9141_NO_CHECKSUM)
+		|| len < 4 || len + 1 > out_cap)
+		return len;
+
+	format = msg->Data[0];
+	if ((format & 0x80) == 0)
+		return len;
+
+	if ((format & 0x3F) != 0)
+		expected_without_checksum = 3 + (format & 0x3F);
+	else
+		expected_without_checksum = 4 + msg->Data[3];
+
+	if (expected_without_checksum + 1 == len)
+		return len;
+	if (expected_without_checksum != len)
+		return len;
+
+	for (i = 0; i < len; i++)
+		checksum = (uint8_t)(checksum + out[i]);
+	out[len] = checksum;
+
+	if (write_log)
+	{
+		snprintf(log_msg, LM_LEN,
+			"\tAppended KWP checksum %02X to length-framed ISO9141/ISO14230 message\n",
+			checksum);
+		writelog(log_msg);
+	}
+
+	return len + 1;
 }
 
 /*
@@ -1467,7 +1514,7 @@ int32_t OP2J2534_CALL PassThruWriteMsgs(const unsigned long ChannelID, const PAS
 		writelogpassthrumsg(pMsg);
 	}
 
-	unsigned long msg_cnt = *pNumMsgs, i = 0, msg_data_size = 0;
+	unsigned long msg_cnt = *pNumMsgs, i = 0, msg_data_size = 0, send_data_size = 0;
 	uint32_t op2_ack_timeout = timeInterval;
 	int drain_kline_tx = FALSE;
 	if (op2_ack_timeout == 0 && (con->channel == ISO9141 || con->channel == ISO14230))
@@ -1487,6 +1534,13 @@ int32_t OP2J2534_CALL PassThruWriteMsgs(const unsigned long ChannelID, const PAS
 		if (msg_data_size > 0 && msg_data_size <= PM_DATA_LEN)
 		{
 			unsigned long tx_flags = op2_tx_flags(pMsg[i].TxFlags);
+			uint8_t send_payload[PM_DATA_LEN];
+			send_data_size = maybe_append_kwp_checksum(&pMsg[i], send_payload, sizeof(send_payload));
+			if (send_data_size == 0)
+			{
+				snprintf(LAST_ERROR, LE_LEN, "Invalid message size: %lu", msg_data_size);
+				return J2534_ERR_INVALID_MSG;
+			}
 			if (write_log && tx_flags != pMsg[i].TxFlags)
 			{
 				snprintf(log_msg, LM_LEN,
@@ -1494,12 +1548,17 @@ int32_t OP2J2534_CALL PassThruWriteMsgs(const unsigned long ChannelID, const PAS
 					pMsg[i].TxFlags, tx_flags);
 				writelog(log_msg);
 			}
-			snprintf(data, PM_DATA_LEN, "att%lu %lu %lu\r\n", ChannelID, pMsg[i].DataSize, tx_flags);
+			snprintf(data, PM_DATA_LEN, "att%lu %lu %lu\r\n", ChannelID, send_data_size, tx_flags);
 
 			strln = strlen(data);
+			if (strln + send_data_size > PM_DATA_LEN)
+			{
+				snprintf(LAST_ERROR, LE_LEN, "Invalid message size: %lu", send_data_size);
+				return J2534_ERR_INVALID_MSG;
+			}
 			uint32_t j = 0;
-			while (j < msg_data_size)
-				data[strln++] = pMsg[i].Data[j++];
+			while (j < send_data_size)
+				data[strln++] = send_payload[j++];
 
 			r = usb_send_expect(data, strln, PM_DATA_LEN, op2_ack_timeout, NULL);
 			if (r == LIBUSB_SUCCESS && drain_kline_tx)
@@ -1817,7 +1876,7 @@ int32_t OP2J2534_CALL PassThruGetLastError(char *pErrorDescription)
 int32_t OP2J2534_CALL PassThruIoctl(const unsigned long ChannelID, const unsigned long ioctlID,
 	const void *pInput, void *pOutput)
 {
-	if (ioctlID != J2534_READ_VBATT && !valid_channel_id(ChannelID))
+	if (ioctlID != J2534_READ_VBATT && ioctlID != J2534_READ_PROG_VOLTAGE && !valid_channel_id(ChannelID))
 	{
 		snprintf(LAST_ERROR, LE_LEN, "Error: Invalid ChannelID");
 		return J2534_ERR_INVALID_CHANNEL_ID;
@@ -1942,15 +2001,15 @@ int32_t OP2J2534_CALL PassThruIoctl(const unsigned long ChannelID, const unsigne
 			r = usb_send_expect(data, strlen(data), MAX_LEN, 2000, NULL);
 		}
 	}
-	if (ioctlID == J2534_READ_VBATT)
+	if (ioctlID == J2534_READ_VBATT || ioctlID == J2534_READ_PROG_VOLTAGE)
 	{
 		if (pOutput == NULL)
 		{
-			snprintf(LAST_ERROR, LE_LEN, "Error: READ_VBATT output must not be NULL");
+			snprintf(LAST_ERROR, LE_LEN, "Error: voltage output must not be NULL");
 			return J2534_ERR_NULL_PARAMETER;
 		}
 		if (write_log)
-			writelog("[READ_VBATT]\n");
+			writelog(ioctlID == J2534_READ_VBATT ? "[READ_VBATT]\n" : "[READ_PROG_VOLTAGE]\n");
 		uint32_t *vBatt = pOutput;
 		uint32_t pin = 16;
 		snprintf(data, MAX_LEN, "atr %u\r\n", pin);
@@ -2164,6 +2223,20 @@ int32_t OP2J2534_CALL PassThruIoctl(const unsigned long ChannelID, const unsigne
 	{
 		if (write_log)
 			writelog("[CLEAR_MSG_FILTERS]\n");
+		r = LIBUSB_SUCCESS;
+	}
+	if (ioctlID == J2534_CLEAR_PERIODIC_MSGS)
+	{
+		if (write_log)
+			writelog("[CLEAR_PERIODIC_MSGS]\n");
+		r = LIBUSB_SUCCESS;
+	}
+	if (ioctlID == J2534_CLEAR_FUNCT_MSG_LOOKUP_TABLE
+		|| ioctlID == J2534_ADD_TO_FUNCT_MSG_LOOKUP_TABLE
+		|| ioctlID == J2534_DELETE_FROM_FUNCT_MSG_LOOUP_TABLE)
+	{
+		if (write_log)
+			writelog("[FUNCT_MSG_LOOKUP_TABLE no-op]\n");
 		r = LIBUSB_SUCCESS;
 	}
 

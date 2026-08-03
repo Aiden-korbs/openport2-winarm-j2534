@@ -42,8 +42,9 @@ Tactrix, OpenPort, EvoScan, EcuFlash, Honda, Mitsubishi, and other product names
 - Fixes for channel validation and `PassThruGetLastError` copying.
 - Timeout handling for `PassThruReadMsgs(..., Timeout=0)`.
 - 29-bit CAN flag handling.
-- Basic support for `CLEAR_MSG_FILTERS`.
-- EvoScan/OpenPort compatibility work, including `READ_VBATT` before channel connect and experimental `FIVE_BAUD_INIT` support.
+- Basic support/no-ops for clear-buffer, filter, periodic-message, and function-message-table setup calls used by some applications.
+- EvoScan/OpenPort compatibility work, including `READ_VBATT` / `READ_PROG_VOLTAGE` before channel connect and experimental `FIVE_BAUD_INIT` support.
+- Optional Windows J2534 registry helper for a K-line-only OpenPort alias.
 - Diagnostic logging on DLL load and J2534 calls via `LOG_ENABLE`.
 - Native macOS ARM64 OpenPort ISO9141/K-line tester and safe generic OBD scanner.
 
@@ -243,6 +244,21 @@ To run the safe read-only generic OBD scanner and write a timestamped log:
 extras/build_run_macos_openport_iso9141_scan.sh
 ```
 
+To run the larger read-only probe intended to find non-generic/ECU-specific data that the generic OBD scanner missed:
+
+```sh
+extras/build_run_macos_openport_iso9141_probe.sh
+```
+
+The large probe writes `extras/macos_openport_probe_YYYYMMDD_HHMMSS.log`. To quickly inspect only useful responses:
+
+```sh
+grep '^HIT' extras/macos_openport_probe_*.log
+grep '^HIT' extras/macos_openport_probe_*.log | grep -v 'negative_for='
+```
+
+The large probe can take 30 minutes or more because most unknown identifiers will time out rather than answer.
+
 The tester performs the same K-line setup used by the Windows tester:
 
 - OpenPort `ato3 512 10400 0`
@@ -271,11 +287,20 @@ The safe scanner exhausts these read-only generic OBD services over ISO9141/K-li
 
 It intentionally skips destructive/control services such as `04` Clear DTC and `08` Control Operation.
 
+The larger probe also skips reset, security, write, clear, output-control, routine-control, and session-control services. In addition to the generic OBD scan above, it tries read/status style services that can expose ECU-specific data on older K-line ECUs:
+
+- KWP/Honda `1A 80..9F`: ECU identification records.
+- KWP/Honda `21 00..FF`: local data identifiers.
+- KWP/UDS `22 F100..F11F`, `22 F180..F19F`, and `22 0000..00FF`: common read-data identifiers.
+- DTC read candidates `17`, `18`, and `19` forms only; no clear-DTC requests.
+
 ## Honda HDS / I-HDS Notes
 
 Honda HDS/I-HDS may list J2534 providers from the Windows registry but still prefer Honda/SPX-specific provider names or capability flags. The HDS SPX MVCI patcher references this registry key:
 
 Current I-HDS status: I-HDS can be launched with the patched DLL and can reach the VCI selection/VCI connection stage using OpenPort 2.0, but it does not successfully communicate with the tested 2005 CR-V. The J2534 log shows I-HDS connecting/probing ISO15765/CAN at `500000` baud (`protocolID: 6`) instead of using the working ISO9141/K-line path (`protocolID: 3`, `10400` baud, five-baud init `0x33`). Treat I-HDS as not working for this vehicle/interface path for now; EvoScan and the native macOS tester prove the OpenPort/K-line vehicle transport itself works.
+
+Later HDS logs did show one ISO9141 attempt: `protocolID: 3`, `10400` baud, `FIVE_BAUD_INIT 0x33`, followed by a KWP-style tester-present frame `80 46 F0 02 3E 02`. That frame is length-coded and does not include the trailing checksum byte, so the DLL now appends a checksum only for ISO9141/ISO14230 KWP format-byte messages where the encoded length proves the checksum is absent. Already-checksummed frames, including the known-good EvoScan generic OBD frames, are left unchanged.
 
 ```text
 HKLM\SOFTWARE\WOW6432Node\PassThruSupport.04.04\SPX-Device1
@@ -288,6 +313,14 @@ extras\register_honda_aliases_windows_arm.cmd
 ```
 
 This creates `SPX-Device1` pointing at `C:\J2534\OpenPort\j2534.dll` and adds Honda capability flags plus J2534 version metadata to the normal OpenPort provider. It does not modify an existing `Teradyne - GNA600` provider unless explicitly requested.
+
+For older Honda vehicles where the application appears to prefer CAN/ISO15765 based on advertised provider capabilities, you can also register a separate K-line-only alias:
+
+```bat
+extras\register_kline_only_alias_windows_arm.cmd
+```
+
+This creates `OpenPort 2.0 ISO9141 K-Line` with `ISO9141=1`, `ISO14230=1`, `CAN=0`, and `ISO15765=0`. It does not remove or modify the normal all-protocol OpenPort provider. This may help applications that choose protocol/provider from registry capability flags, but it will not fix applications that are hard-coded to probe CAN for the selected vehicle.
 
 For I-HDS D-PDU testing, launch I-HDS with logging set in the process environment instead of relying only on machine-wide environment propagation:
 
@@ -304,6 +337,22 @@ extras\launch_ihds_with_openport_logging.cmd "C:\i-HDS\Launcher.exe" -selector
 ```
 
 ProcMon may show `ppl_j2534.exe` reading the J2534 registry entries and successfully loading `C:\J2534\OpenPort\j2534.dll` before any vehicle communication happens. If `C:\J2534\op2.log` still remains empty after launching this way, the problem is no longer DLL discovery; I-HDS/D-PDU loaded the DLL but has not called into the OpenPort J2534 implementation yet.
+
+## Honda Tuning Suite Notes
+
+HTS can be launched with the same OpenPort DLL discovery/logging environment:
+
+```bat
+extras\launch_hts_with_openport_logging.cmd
+```
+
+If HTS is installed somewhere else, pass the executable path:
+
+```bat
+extras\launch_hts_with_openport_logging.cmd "C:\path\to\HTS2.15.exe"
+```
+
+On the tested 2005 CR-V, HTS can reach the OpenPort J2534 DLL when launched this way, but it chooses ISO15765/CAN at `500000` baud for the tested path instead of the working ISO9141/K-line transport. The K-line-only registry alias is worth testing if HTS exposes it as a selectable J2534 device, but do not assume it will override HTS vehicle/protocol logic.
 
 For older vehicles that use classic HDS rather than the i-HDS Eclipse workflow, use the GenRad SysNav launcher first:
 
