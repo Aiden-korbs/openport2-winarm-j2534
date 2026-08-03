@@ -94,6 +94,7 @@ const uint8_t ISO14230 = 0x34;
 const uint8_t CAN = 0x35;
 const uint8_t ISO15765 = 0x36;
 const unsigned long CAN_29BIT_ID = 0x00000100UL;
+const unsigned long ISO15765_FRAME_PAD = 0x00000040UL;
 char LAST_ERROR[LE_LEN];
 int littleEndian = TRUE;
 int write_log = FALSE;
@@ -512,6 +513,13 @@ static int pattern_search(const uint8_t *data, const int data_len, const char *p
 	return -1;
 }
 
+static unsigned long op2_tx_flags(const unsigned long j2534_flags)
+{
+	/* The OpenPort firmware command flags are not a raw J2534 TxFlags bitfield.
+	   Passing ISO15765_FRAME_PAD through to att causes firmware errors on Honda I-HDS. */
+	return j2534_flags & ~ISO15765_FRAME_PAD;
+}
+
 /*
   Send data and expect to receive a reply, using specified timeout.
   If expect is NULL then command is acknowledged by aro response.
@@ -589,11 +597,17 @@ static int usb_send_expect(uint8_t *data, const size_t len,
 					writelog("\n");
 				}
 
-				if (data[2] == 0x65)	// e
+				if (bytes_read >= 5 && data[0] == 0x61 && data[1] == 0x72 && data[2] == 0x65)	// are
 				{
 					unsigned long errnum = strtoul(data + 4, NULL, 10);
 					if (is_valid(errnum))
 					{
+						if (errnum == J2534_ERR_TIMEOUT)
+						{
+							if (write_log)
+								writelog("\t\tIgnoring pending OpenPort transmit timeout status\n");
+							continue;
+						}
 						snprintf(LAST_ERROR, LE_LEN, "Error: J2534 device comms error: %lu", errnum);
 						return errnum;
 					}
@@ -626,6 +640,85 @@ static int usb_send_expect(uint8_t *data, const size_t len,
 		}
 	}
 	return r;
+}
+
+static void drain_kline_tx_completion(const uint8_t channel, const uint32_t timeout)
+{
+	uint8_t data[PM_DATA_LEN];
+	int bytes_read = 0;
+	int r = LIBUSB_SUCCESS;
+	int saw_end = FALSE;
+
+	while (!saw_end)
+	{
+		r = libusb_bulk_transfer(con->dev_handle, endpoint->addr_in,
+			data, PM_DATA_LEN, &bytes_read, timeout);
+
+		if (r == LIBUSB_ERROR_TIMEOUT)
+		{
+			if (write_log)
+				writelog("\tK-line TX completion drain timed out\n");
+			return;
+		}
+		if (r != LIBUSB_SUCCESS)
+		{
+			if (write_log)
+			{
+				snprintf(log_msg, LM_LEN, "\tK-line TX completion drain error: %s\n", libusb_error_name(r));
+				writelog(log_msg);
+			}
+			return;
+		}
+
+		if (write_log)
+		{
+			writelog("\tK-line TX completion drain Rcvd:\n\t\t");
+			if (bytes_read > 0)
+				writelogmsg(data, 0, bytes_read);
+			else
+				writelog("bytes_read: 0, USB stream Rcvd");
+			writelog("\n");
+		}
+
+		int bytes_processed = 0;
+		while (bytes_processed + 5 <= bytes_read)
+		{
+			if (data[bytes_processed + 0] != 0x61 || data[bytes_processed + 1] != 0x72)
+				return;
+
+			if (data[bytes_processed + 2] == 0x6F)
+			{
+				bytes_processed += 5;
+				continue;
+			}
+
+			if (data[bytes_processed + 2] == 0x65)
+				return;
+
+			if (data[bytes_processed + 2] != channel)
+				return;
+
+			uint8_t packet_len = data[bytes_processed + 3];
+			if (packet_len == 0 || bytes_processed + packet_len + 4 > bytes_read)
+				return;
+
+			uint8_t packet_type = data[bytes_processed + 4];
+			if (packet_type == TX_LB_START_IND || packet_type == TX_LB_MSG || packet_type == LB_MSG_END_IND)
+			{
+				if (packet_type == LB_MSG_END_IND)
+					saw_end = TRUE;
+				bytes_processed += packet_len + 4;
+				continue;
+			}
+
+			if (write_log)
+			{
+				snprintf(log_msg, LM_LEN, "\tK-line TX completion drain stopped at packet type: %02X\n", packet_type);
+				writelog(log_msg);
+			}
+			return;
+		}
+	}
 }
 
 static int usb_send_read_once(uint8_t *data, const size_t len,
@@ -1375,6 +1468,13 @@ int32_t OP2J2534_CALL PassThruWriteMsgs(const unsigned long ChannelID, const PAS
 	}
 
 	unsigned long msg_cnt = *pNumMsgs, i = 0, msg_data_size = 0;
+	uint32_t op2_ack_timeout = timeInterval;
+	int drain_kline_tx = FALSE;
+	if (op2_ack_timeout == 0 && (con->channel == ISO9141 || con->channel == ISO14230))
+	{
+		op2_ack_timeout = 100;
+		drain_kline_tx = TRUE;
+	}
 	int r = LIBUSB_SUCCESS;
 	uint8_t data[PM_DATA_LEN];
 	size_t strln = 0;
@@ -1386,14 +1486,24 @@ int32_t OP2J2534_CALL PassThruWriteMsgs(const unsigned long ChannelID, const PAS
 
 		if (msg_data_size > 0 && msg_data_size <= PM_DATA_LEN)
 		{
-			snprintf(data, PM_DATA_LEN, "att%lu %lu %lu\r\n", ChannelID, pMsg[i].DataSize, pMsg[i].TxFlags);
+			unsigned long tx_flags = op2_tx_flags(pMsg[i].TxFlags);
+			if (write_log && tx_flags != pMsg[i].TxFlags)
+			{
+				snprintf(log_msg, LM_LEN,
+					"\tOpenPort tx flags:\t%08lX -> %08lX\n",
+					pMsg[i].TxFlags, tx_flags);
+				writelog(log_msg);
+			}
+			snprintf(data, PM_DATA_LEN, "att%lu %lu %lu\r\n", ChannelID, pMsg[i].DataSize, tx_flags);
 
 			strln = strlen(data);
 			uint32_t j = 0;
 			while (j < msg_data_size)
 				data[strln++] = pMsg[i].Data[j++];
 
-			r = usb_send_expect(data, strln, PM_DATA_LEN, 0, NULL);
+			r = usb_send_expect(data, strln, PM_DATA_LEN, op2_ack_timeout, NULL);
+			if (r == LIBUSB_SUCCESS && drain_kline_tx)
+				drain_kline_tx_completion(con->channel, op2_ack_timeout);
 		}
 		else
 		{
@@ -1603,6 +1713,13 @@ int32_t OP2J2534_CALL PassThruSetProgrammingVoltage(const unsigned long DeviceID
 			"\tvoltage:\t%lu\n",
 			DeviceID, pinNumber, voltage);
 		writelog(log_msg);
+	}
+
+	if (voltage == 0xFFFFFFFFUL)
+	{
+		if (write_log)
+			writelog("\tProgramming voltage off request ignored; OpenPort atx does not support -1\n");
+		return J2534_NOERROR;
 	}
 
 	uint8_t data[MAX_LEN];

@@ -1,11 +1,15 @@
-# OpenPort 2.0 J2534 for Windows ARM
+# OpenPort 2.0 ARM Diagnostics
 
-This is a Windows ARM focused fork of `j2534`, a libusb-based SAE J2534-1 library for the Tactrix OpenPort 2.0 cable.
+This is an ARM-focused OpenPort 2.0 diagnostics project based on `j2534`, a libusb-based SAE J2534-1 library for the Tactrix OpenPort 2.0 cable.
 
-The goal of this fork is to make an OpenPort 2.0 usable from 32-bit x86 diagnostic applications running under Windows 11 ARM emulation, where the original Tactrix x86/x64 kernel driver cannot be loaded.
+The project has two related goals:
 
-Tested target setup:
+- Make OpenPort 2.0 usable from 32-bit x86 diagnostic applications running under Windows 11 ARM emulation, where the original Tactrix x86/x64 kernel driver cannot be loaded.
+- Provide native Apple Silicon/macOS command-line diagnostics that talk directly to OpenPort 2.0 through libusb.
 
+Tested target setups:
+
+- Apple Silicon Mac running native macOS ARM64 tools with Homebrew `libusb`.
 - Apple Silicon Mac running a Windows 11 ARM VM
 - OpenPort 2.0 USB device attached to the VM
 - OpenPort bound to Microsoft WinUSB with Zadig
@@ -41,12 +45,15 @@ Tactrix, OpenPort, EvoScan, EcuFlash, Honda, Mitsubishi, and other product names
 - Basic support for `CLEAR_MSG_FILTERS`.
 - EvoScan/OpenPort compatibility work, including `READ_VBATT` before channel connect and experimental `FIVE_BAUD_INIT` support.
 - Diagnostic logging on DLL load and J2534 calls via `LOG_ENABLE`.
+- Native macOS ARM64 OpenPort ISO9141/K-line tester and safe generic OBD scanner.
 
-## Why Windows ARM Needs This
+## Why ARM Needs This
 
 Windows ARM can run many x86 user-mode applications and DLLs, but it cannot load x86/x64 kernel drivers. The normal Tactrix OpenPort driver path depends on a kernel driver, so it is not suitable for Windows ARM VMs.
 
 This fork uses WinUSB plus libusb from an emulated x86 DLL. The USB driver remains native Windows, while the diagnostic application and this J2534 DLL run as x86 user-mode code.
+
+On Apple Silicon macOS, the native tools skip J2534 entirely and use libusb directly against OpenPort 2.0. These tools are intended for diagnostics and reverse engineering of read-only request/response behavior, not flashing.
 
 ## Build On Windows ARM
 
@@ -77,7 +84,11 @@ cd /d C:\path\to\openport2-winarm-j2534
 
 If your Visual Studio install uses a different MSBuild path or version, adjust the command. The solution platform is `x86`, not `Win32`.
 
-If the project complains about an unavailable platform toolset, retarget `j2534\j2534.vcxproj` to the installed toolset, for example `v145`.
+The project defaults to the Visual Studio 2022 C++ toolset, `v143`. The installer detects the installed C++ toolset and passes it to MSBuild automatically. For a manual build, if the project complains about an unavailable platform toolset, add the installed toolset explicitly, for example:
+
+```bat
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe" j2534.sln /p:Configuration=Release /p:Platform=x86 /p:PlatformToolset=v143
+```
 
 ## OpenPort Driver Setup
 
@@ -120,7 +131,23 @@ extras\install_windows_arm.cmd -EvoScanDir "C:\Program Files (x86)\EvoScan\EvoSc
 
 The installer will build `Release|x86` if needed, copy the DLLs to `C:\J2534\OpenPort`, register the 32-bit J2534 provider, enable logging, replace EvoScan's `op20pt32.dll`, and print OpenPort USB status.
 
-If the required libusb files are missing, the installer downloads the official libusb release from GitHub, verifies its SHA-256 hash, extracts it with 7-Zip, and copies the x86 files into the expected repo layout. Install 7-Zip first if you want this automatic path.
+Before changing anything, the installer checks for the common missing pieces: libusb layout, 7-Zip, MSBuild, and the Visual Studio Desktop C++ workload. If something is missing, it prints the exact install commands to run.
+
+To only check prerequisites, use:
+
+```bat
+extras\install_windows_arm.cmd -CheckOnly
+```
+
+To let the installer use `winget` for missing prerequisites such as 7-Zip or Visual Studio Build Tools with the Desktop C++ workload, use:
+
+```bat
+extras\install_windows_arm.cmd -InstallMissingPrereqs -EvoScanDir "C:\Program Files (x86)\EvoScan\EvoScan v2.9"
+```
+
+If Build Tools or 7-Zip were just installed, close and reopen the Administrator Command Prompt before re-running the installer if Windows has not refreshed `PATH` yet. If the Visual Studio Installer reports exit code `3010`, restart Windows, then re-run the installer.
+
+If the required libusb files are missing, the installer downloads the official libusb release from GitHub, verifies its SHA-256 hash, extracts it with 7-Zip, and copies the x86 files into the expected repo layout.
 
 If PowerShell script execution is blocked, use the `.cmd` launcher above. It runs PowerShell with `-ExecutionPolicy Bypass` for that one invocation only.
 
@@ -165,6 +192,14 @@ HKLM\SOFTWARE\WOW6432Node\PassThruSupport.04.04\RomRaider - OP2 J2534
 
 EvoScan can load OpenPort support directly from its own `op20pt32.dll` rather than using the Windows J2534 registry. For EvoScan, replace that DLL with this fork's built DLL.
 
+Before running the EvoScan installer on a fresh Windows ARM VM, enable the legacy .NET Framework feature EvoScan asks for:
+
+```bat
+extras\prepare_evoscan_windows_arm.cmd
+```
+
+This enables `.NET Framework 3.5`, which includes `.NET 2.0`. If the EvoScan installer asks to download `.NET Framework 2.0` from the web, click `No`; use the Windows feature instead.
+
 Run from an Administrator Command Prompt:
 
 ```bat
@@ -186,6 +221,145 @@ libusb\MS32\Release\dll\libusb-1.0.dll -> libusb-1.0.dll
 
 If EvoScan shows an FTDI driver warning on Windows ARM, do not install the FTDI/Tactrix driver path for OpenPort. The working path for this fork is WinUSB/libusb.
 
+## Native macOS Apple Silicon Tester
+
+This repo also includes a standalone native macOS ARM64 OpenPort diagnostic tester. It is not a J2534 library and it does not run Windows applications such as EvoScan or i-HDS. It talks directly to OpenPort 2.0 with `libusb` and mirrors the ISO9141/K-line sequence that worked with EvoScan on a 2005 Honda CR-V.
+
+Install dependencies:
+
+```sh
+brew install libusb pkg-config
+```
+
+Attach the OpenPort USB device to macOS, not the Windows VM, then run:
+
+```sh
+extras/build_run_macos_openport_iso9141_mode09.sh
+```
+
+To run the safe read-only generic OBD scanner and write a timestamped log:
+
+```sh
+extras/build_run_macos_openport_iso9141_scan.sh
+```
+
+The tester performs the same K-line setup used by the Windows tester:
+
+- OpenPort `ato3 512 10400 0`
+- EvoScan-compatible ISO9141 timing config
+- broad pass filter
+- pre-init `01 00` wake/probe
+- five-baud init with address `0x33`
+- Mode 01 and Mode 09 OBD requests
+
+On the tested 2005 CR-V, generic Mode 01 works and Mode 09 PID `00` responds. The corrected native scanner also found Mode 09 calibration/CVN data over generic OBD:
+
+- `09 04`: multi-frame calibration ID pieces, reconstructing as `37805-PPA-Q120`, `37850-RCA-A100` from returned text fragments.
+- `09 06`: CVN bytes `4A FC 69 88`.
+- `09 02`: VIN did not respond.
+
+The safe scanner exhausts these read-only generic OBD services over ISO9141/K-line:
+
+- `01 00..FF`: current powertrain data
+- `02 00..FF`: freeze-frame data
+- `03`: stored DTC read
+- `05 00..FF`: oxygen sensor monitor data
+- `06 00..FF`: on-board monitor data
+- `07`: pending DTC read
+- `09 00..FF`: vehicle information
+- `0A`: permanent DTC read
+
+It intentionally skips destructive/control services such as `04` Clear DTC and `08` Control Operation.
+
+## Honda HDS / I-HDS Notes
+
+Honda HDS/I-HDS may list J2534 providers from the Windows registry but still prefer Honda/SPX-specific provider names or capability flags. The HDS SPX MVCI patcher references this registry key:
+
+Current I-HDS status: I-HDS can be launched with the patched DLL and can reach the VCI selection/VCI connection stage using OpenPort 2.0, but it does not successfully communicate with the tested 2005 CR-V. The J2534 log shows I-HDS connecting/probing ISO15765/CAN at `500000` baud (`protocolID: 6`) instead of using the working ISO9141/K-line path (`protocolID: 3`, `10400` baud, five-baud init `0x33`). Treat I-HDS as not working for this vehicle/interface path for now; EvoScan and the native macOS tester prove the OpenPort/K-line vehicle transport itself works.
+
+```text
+HKLM\SOFTWARE\WOW6432Node\PassThruSupport.04.04\SPX-Device1
+```
+
+After installing this fork, you can add Honda-compatible alias entries with:
+
+```bat
+extras\register_honda_aliases_windows_arm.cmd
+```
+
+This creates `SPX-Device1` pointing at `C:\J2534\OpenPort\j2534.dll` and adds Honda capability flags plus J2534 version metadata to the normal OpenPort provider. It does not modify an existing `Teradyne - GNA600` provider unless explicitly requested.
+
+For I-HDS D-PDU testing, launch I-HDS with logging set in the process environment instead of relying only on machine-wide environment propagation:
+
+```bat
+extras\launch_ihds_with_openport_logging.cmd
+```
+
+By default this runs `C:\i-HDS\Launcher.exe -selector`, which opens the same Diagnostic System selection menu as `C:\Users\Public\Desktop\Diagnostic System.lnk`. The launcher starts I-HDS with the executable's directory as the working directory and prepends `C:\J2534\OpenPort` to `PATH` so `ppl_j2534.exe` can resolve `libusb-1.0.dll` after loading `j2534.dll`. This matters because the Eclipse/Java application loads native helper DLLs during startup. If I-HDS fails before opening with an error like `UnsatisfiedLinkError: ca.beq.util.win32.registry.RegistryKey.testInitialized()V`, that is a Java registry JNI startup problem, not an OpenPort/J2534 problem.
+
+To override the target manually, pass the executable and arguments explicitly:
+
+```bat
+extras\launch_ihds_with_openport_logging.cmd "C:\i-HDS\Launcher.exe" -selector
+```
+
+ProcMon may show `ppl_j2534.exe` reading the J2534 registry entries and successfully loading `C:\J2534\OpenPort\j2534.dll` before any vehicle communication happens. If `C:\J2534\op2.log` still remains empty after launching this way, the problem is no longer DLL discovery; I-HDS/D-PDU loaded the DLL but has not called into the OpenPort J2534 implementation yet.
+
+For older vehicles that use classic HDS rather than the i-HDS Eclipse workflow, use the GenRad SysNav launcher first:
+
+```bat
+extras\launch_hds_sysnav_with_openport_logging.cmd
+```
+
+This runs `C:\GenRad\DiagSystem\Runtime\SysNav.exe` from the runtime directory. `SysNav.ini` starts `testman.exe /a:Setup /a:Vehicle`, which is the classic vehicle-selection workflow.
+
+If SysNav opens but shows errors like `Registry database location not found`, `Could not find file \My Documents\Values`, or `WID-DIB-7`, repair the legacy GenRad registry paths from an Administrator Command Prompt. The repair writes both machine-wide and current-user legacy keys because different GenRad components read different roots:
+
+```bat
+extras\repair_hds_legacy_registry.cmd
+```
+
+If you specifically need the Scantool module shortcut path, use:
+
+```bat
+extras\launch_hds_scantool_with_openport_logging.cmd
+```
+
+This follows the installed Start Menu shortcut `Diagnostic System\Scantool.lnk`, which runs `C:\GenRad\DiagSystem\Launcher\Launcher.exe` with `C:\GenRad\DiagSystem\Runtime\Scantool.exe`. Classic HDS uses `C:\GenRad\DiagSystem\Runtime\DS253432-04.dll`, which reads the 32-bit `PassThruSupport.04.04` registry and loads the configured J2534 `FunctionLibrary`. For this path, register the Honda aliases with GNA600 replacement so the `Teradyne - GNA600` provider points at this fork:
+
+```bat
+extras\register_honda_aliases_windows_arm.cmd -ReplaceGNA600
+```
+
+Useful ProcMon filters for the I-HDS path are:
+
+```text
+Process Name is iHDS.exe
+Process Name is ppl_j2534.exe
+Path contains C:\J2534
+Path contains j2534.dll
+Path contains libusb
+Path contains op2.log
+Path contains PassThruSupport
+Path contains D-PDU_API
+Operation is Process Create
+Operation is Load Image
+```
+
+If you need to test whether HDS/I-HDS is hardwired to the installed GNA600 provider, run:
+
+```bat
+extras\register_honda_aliases_windows_arm.cmd -ReplaceGNA600
+```
+
+This backs up the existing GNA600 registry key to `C:\J2534\gna600-backup.reg` before repointing it. Restore it with:
+
+```bat
+reg import C:\J2534\gna600-backup.reg
+```
+
+Use HDS/I-HDS for diagnostics first. Do not attempt ECU rewrite/flashing through this fork until communication is proven stable and the required J2534 calls have been verified in logs.
+
 ## Logging
 
 Enable logging with:
@@ -203,7 +377,7 @@ View logs with:
 type C:\J2534\op2.log
 ```
 
-If no log appears, the application did not load this DLL.
+For most applications, no log means the application did not load this DLL. For I-HDS/D-PDU, also check ProcMon `Load Image` events because `ppl_j2534.exe` can load the DLL before calling any J2534 entry point that produces a useful runtime log.
 
 ## Known Working Result
 
